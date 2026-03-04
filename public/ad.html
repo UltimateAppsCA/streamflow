@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 250px;
+      background: transparent;
+      overflow: hidden;
+    }
+    #ad-container {
+      width: 100%;
+      height: 250px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="container-01a0abf1551bae001e9b8ffeb0c70190"></div>
+  <script async="async" data-cfasync="false" src="https://pl28823198.effectivegatecpm.com/01a0abf1551bae001e9b8ffeb0c70190/invoke.js"></script>
+  
+  <script>
+    // Notify parent when ad loads
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        if (window.parent !== window) {
+          window.parent.postMessage('ad-loaded', '*');
+        }
+      }, 1000);
+    });
+    
+    // Fallback check
+    setTimeout(function() {
+      var container = document.getElementById('container-01a0abf1551bae001e9b8ffeb0c70190');
+      if (container && container.innerHTML === '') {
+        if (window.parent !== window) {
+          window.parent.postMessage('ad-failed', '*');
+        }
+      }
+    }, 5000);
+  </script>
+</body>
+</html>
