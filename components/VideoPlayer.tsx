@@ -93,6 +93,20 @@ function isMobile(): boolean {
   return isIOS() || isAndroid();
 }
 
+// Get the correct API base URL - FIX FOR RENDER DEPLOYMENT
+function getApiBaseUrl(): string {
+  if (typeof window === 'undefined') return '';
+  
+  // Use the actual browser URL, not localhost
+  const protocol = window.location.protocol;
+  const host = window.location.host;
+  
+  // Debug log
+  console.log('API Base URL:', `${protocol}//${host}`);
+  
+  return `${protocol}//${host}`;
+}
+
 export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -275,13 +289,18 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
     const originalUrl = channel.m3u8Url;
     const useProxy = needsProxy(originalUrl);
+    
+    // FIX: Use absolute URL with proper origin detection
+    const apiBase = getApiBaseUrl();
     const streamUrl = useProxy 
-      ? `/api/stream?url=${encodeURIComponent(originalUrl)}`
+      ? `${apiBase}/api/stream?url=${encodeURIComponent(originalUrl)}`
       : originalUrl;
     
     videoSrcRef.current = streamUrl;
 
     console.log('Playing stream:', useProxy ? 'proxied' : 'direct', streamUrl.substring(0, 100));
+    console.log('Window location:', window.location.href);
+    console.log('API Base:', apiBase);
 
     const setupPlayer = () => {
       try {
