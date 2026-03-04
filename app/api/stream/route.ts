@@ -10,6 +10,13 @@ const PROXY_HEADERS = {
   'Pragma': 'no-cache',
 };
 
+// FIX: Hardcode your public URL or detect from headers
+// Option 1: Hardcode (most reliable for Render)
+const PUBLIC_URL = 'https://streamflow-9r6k.onrender.com';
+
+// Option 2: Use environment variable (set in Render dashboard)
+// const PUBLIC_URL = process.env.NEXT_PUBLIC_API_URL || 'https://streamflow-9r6k.onrender.com';
+
 export async function GET(request: NextRequest) {
   const url = request.nextUrl.searchParams.get('url');
   
@@ -119,7 +126,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Process M3U8 playlist
-    const body = await response.text();
+    let body = await response.text();
     
     // Check for HTML error
     if (body.trim().startsWith('<!DOCTYPE') || body.trim().startsWith('<html')) {
@@ -129,7 +136,11 @@ export async function GET(request: NextRequest) {
       }, { status: 403 });
     }
 
-    const proxyBase = `${request.nextUrl.origin}/api/stream?url=`;
+    // CRITICAL FIX: Replace any localhost:10000 that might be in the playlist
+    body = body.replace(/https?:\/\/localhost:10000/g, PUBLIC_URL);
+
+    // FIX: Use PUBLIC_URL instead of request.nextUrl.origin
+    const proxyBase = `${PUBLIC_URL}/api/stream?url=`;
 
     // Process M3U8 with improved URL handling
     const lines = body.split('\n');
