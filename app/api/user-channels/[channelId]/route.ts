@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { sql } from '@/lib/db';
 
+
 // DELETE - Remove a channel from user's list
 export async function DELETE(
   request: NextRequest,

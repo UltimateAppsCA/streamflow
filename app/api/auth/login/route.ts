@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { comparePassword, generateToken } from '@/lib/auth';
 
+
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json();

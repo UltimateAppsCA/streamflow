@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { neon } from '@neondatabase/serverless';
 
+
 export async function GET(request: NextRequest) {
   try {
     const token = request.cookies.get('token')?.value;

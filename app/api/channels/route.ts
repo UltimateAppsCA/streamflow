@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getChannels, fetchEPG } from '@/lib/channels';
 
+
 export async function GET() {
   const channels = getChannels();
   return NextResponse.json({ channels });
