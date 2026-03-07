@@ -163,12 +163,31 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     }, 3000);
   }, []);
 
-  // Picture-in-Picture toggle
+  // Picture-in-Picture toggle - with platform-specific handling
   const togglePip = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
 
     try {
+      // Check if PiP is supported
+      if (!document.pictureInPictureEnabled && !isIOS()) {
+        console.log('PiP not supported on this device');
+        return;
+      }
+
+      // iOS PiP (using webkitPresentationMode)
+      if (isIOS()) {
+        if (video.webkitPresentationMode === 'picture-in-picture') {
+          video.webkitSetPresentationMode?.('inline');
+          setIsPip(false);
+        } else {
+          video.webkitSetPresentationMode?.('picture-in-picture');
+          setIsPip(true);
+        }
+        return;
+      }
+
+      // Android/Desktop PiP (using Picture-in-Picture API)
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
         setIsPip(false);
@@ -251,7 +270,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
     document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 
-    // Handle PiP events
+    // Handle PiP events (for Android/Desktop)
     const handleEnterPip = () => setIsPip(true);
     const handleLeavePip = () => setIsPip(false);
     
@@ -457,35 +476,53 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   };
 
   const handleFullscreen = () => {
-    const container = containerRef.current;
-    if (!container) return;
+    const video = videoRef.current;
+    if (!video) return;
 
-    if (videoRef.current && !videoRef.current.paused) {
-      playTimeRef.current = videoRef.current.currentTime;
-    }
+    if (isIOS()) {
+      // iOS: Use video.webkitEnterFullscreen() for native fullscreen
+      try {
+        video.webkitEnterFullscreen();
+      } catch (err) {
+        console.error('iOS fullscreen failed:', err);
+      }
+    } else {
+      // Android/Desktop: Use container fullscreen
+      const container = containerRef.current;
+      if (!container) return;
 
-    if (container.requestFullscreen) {
-      container.requestFullscreen();
-    } else if ((container as any).webkitRequestFullscreen) {
-      (container as any).webkitRequestFullscreen();
-    } else if ((container as any).mozRequestFullScreen) {
-      (container as any).mozRequestFullScreen();
-    } else if ((container as any).msRequestFullscreen) {
-      (container as any).msRequestFullscreen();
-    }
+      if (video && !video.paused) {
+        playTimeRef.current = video.currentTime;
+      }
 
-    // Force hide native controls on Android
-    if (isAndroid() && videoRef.current) {
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.controls = false;
-        }
-      }, 100);
+      if (container.requestFullscreen) {
+        container.requestFullscreen();
+      } else if ((container as any).webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
+      } else if ((container as any).mozRequestFullScreen) {
+        (container as any).mozRequestFullScreen();
+      } else if ((container as any).msRequestFullscreen) {
+        (container as any).msRequestFullscreen();
+      }
+
+      // Force hide native controls on Android
+      if (isAndroid() && video) {
+        setTimeout(() => {
+          if (video) {
+            video.controls = false;
+          }
+        }, 100);
+      }
     }
   };
 
   const handleExitFullscreen = () => {
-    if (document.fullscreenElement) {
+    const video = videoRef.current;
+    
+    if (isIOS() && video && video.webkitExitFullscreen) {
+      // iOS exit fullscreen
+      video.webkitExitFullscreen();
+    } else if (document.fullscreenElement) {
       document.exitFullscreen();
     } else if ((document as any).webkitExitFullscreen) {
       (document as any).webkitExitFullscreen();
@@ -506,6 +543,15 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       videoRef.current.load();
     }
   };
+
+  // Check if PiP is available on this device
+  const isPipAvailable = useCallback(() => {
+    if (isIOS()) {
+      // iOS 14+ supports PiP via webkitSupportsPresentationMode
+      return videoRef.current?.webkitSupportsPresentationMode?.('picture-in-picture') || false;
+    }
+    return document.pictureInPictureEnabled;
+  }, []);
 
   return (
     <div className="video-player" ref={containerRef}>
@@ -530,8 +576,8 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
               Record
             </button>
             
-            {/* PiP button - show on supported devices */}
-            {document.pictureInPictureEnabled && !isAndroid() && (
+            {/* PiP button - show if available */}
+            {isPipAvailable() && (
               <button 
                 onClick={togglePip} 
                 className={`icon-btn ${isPip ? 'active' : ''}`} 
@@ -608,7 +654,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
                   <span>{channel.name}</span>
                 </div>
                 <div className="fullscreen-controls">
-                  {document.pictureInPictureEnabled && (
+                  {isPipAvailable() && (
                     <button onClick={togglePip} className={`fullscreen-btn ${isPip ? 'active' : ''}`}>
                       <PipIcon />
                     </button>
