@@ -123,6 +123,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   const videoSrcRef = useRef<string>('');
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orientationRef = useRef<number>(window.screen.orientation?.angle || 0);
+  const lastTouchTimeRef = useRef<number>(0);
 
   // Load ad script when component mounts
   useEffect(() => {
@@ -162,6 +163,52 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       setShowControls(false);
     }, 3000);
   }, []);
+
+  // Handle video click/touch for play/pause and controls visibility
+  const handleVideoInteraction = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    
+    const now = Date.now();
+    // Prevent double-tap zoom on mobile
+    if (isMobile() && now - lastTouchTimeRef.current < 300) {
+      return;
+    }
+    lastTouchTimeRef.current = now;
+
+    // Toggle play/pause
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+        // Keep controls visible when paused
+        setShowControls(true);
+        if (controlsTimeoutRef.current) {
+          clearTimeout(controlsTimeoutRef.current);
+        }
+      } else {
+        videoRef.current.play().then(() => {
+          setIsPlaying(true);
+          // Auto-hide controls after playing
+          showControlsTemporarily();
+        }).catch(err => {
+          console.error('Play failed:', err);
+        });
+      }
+    }
+  }, [isPlaying, showControlsTemporarily]);
+
+  // Handle touch start on mobile
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    e.stopPropagation();
+    showControlsTemporarily();
+  }, [showControlsTemporarily]);
+
+  // Handle mouse move (desktop only)
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isMobile()) {
+      showControlsTemporarily();
+    }
+  }, [showControlsTemporarily]);
 
   // Picture-in-Picture toggle - with platform-specific handling
   const togglePip = useCallback(async () => {
@@ -263,6 +310,9 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       if (isAndroid() && videoRef.current) {
         videoRef.current.controls = false;
       }
+
+      // Show controls when entering/exiting fullscreen
+      showControlsTemporarily();
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -286,7 +336,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       videoRef.current?.removeEventListener('enterpictureinpicture', handleEnterPip);
       videoRef.current?.removeEventListener('leavepictureinpicture', handleLeavePip);
     };
-  }, []);
+  }, [showControlsTemporarily]);
 
   // Initialize video player
   useEffect(() => {
@@ -371,9 +421,13 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
             
             video.play().then(() => {
               setIsPlaying(true);
+              // Show controls briefly after play starts
+              showControlsTemporarily();
             }).catch((err) => {
               console.error('Auto-play failed:', err);
               setIsPlaying(false);
+              // Show controls if autoplay fails
+              setShowControls(true);
             });
           });
 
@@ -415,8 +469,12 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
             
             video.play().then(() => {
               setIsPlaying(true);
+              // Show controls briefly after play starts
+              showControlsTemporarily();
             }).catch(() => {
               setIsPlaying(false);
+              // Show controls if autoplay fails
+              setShowControls(true);
             });
           });
           
@@ -451,7 +509,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       video.src = '';
       video.load();
     };
-  }, [channel]);
+  }, [channel, showControlsTemporarily]);
 
   const togglePlay = (e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -460,19 +518,19 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       if (isPlaying) {
         videoRef.current.pause();
         setIsPlaying(false);
+        setShowControls(true);
+        if (controlsTimeoutRef.current) {
+          clearTimeout(controlsTimeoutRef.current);
+        }
       } else {
         videoRef.current.play().then(() => {
           setIsPlaying(true);
+          showControlsTemporarily();
         }).catch(err => {
           console.error('Play failed:', err);
         });
       }
     }
-    showControlsTemporarily();
-  };
-
-  const handleVideoClick = () => {
-    togglePlay();
   };
 
   const handleFullscreen = () => {
@@ -605,9 +663,10 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
       <div 
         className="video-container" 
-        onClick={handleVideoClick} 
-        onMouseMove={showControlsTemporarily}
-        onTouchStart={showControlsTemporarily}
+        onClick={handleVideoInteraction}
+        onTouchStart={handleTouchStart}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => !isMobile() && isPlaying && setShowControls(false)}
       >
         {isLoading && (
           <div className="loading-overlay">
@@ -641,14 +700,14 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
         
         {!isLoading && !error && (
           <>
-            <div className={`video-overlay ${showControls || !isPlaying ? 'visible' : ''}`}>
+            <div className={`video-overlay ${showControls ? 'visible' : ''}`}>
               <button className="play-btn" onClick={(e) => togglePlay(e)}>
                 {isPlaying ? <PauseIcon /> : <PlayIcon />}
               </button>
             </div>
             
             {isFullscreen && (
-              <div className="fullscreen-header">
+              <div className={`fullscreen-header ${showControls ? 'visible' : ''}`}>
                 <div className="fullscreen-channel-info">
                   <img src={channel.logo} alt={channel.name} />
                   <span>{channel.name}</span>
@@ -888,10 +947,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
         .video-overlay.visible {
           opacity: 1;
-        }
-
-        .video-container:hover .video-overlay {
-          opacity: 1;
+          pointer-events: auto;
         }
 
         .play-btn {
@@ -941,8 +997,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
           pointer-events: none;
         }
 
-        .video-container:hover .fullscreen-header,
-        .fullscreen-header:hover {
+        .fullscreen-header.visible {
           opacity: 1;
           pointer-events: auto;
         }
@@ -1032,15 +1087,14 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
             aspect-ratio: auto;
           }
           
-          /* Android specific fixes */
-          .video-container video {
-            /* Prevent Android from showing native controls */
-            pointer-events: none;
+          .play-btn {
+            width: 60px;
+            height: 60px;
           }
           
-          /* But allow clicks on the container */
-          .video-container {
-            pointer-events: auto;
+          .play-btn svg {
+            width: 24px;
+            height: 24px;
           }
         }
       `}</style>
@@ -1077,6 +1131,11 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
         /* Prevent Android from taking over video in fullscreen */
         video::-webkit-media-controls-overlay-play-button {
           display: none !important;
+        }
+        
+        /* Prevent double-tap zoom on mobile */
+        .video-container {
+          touch-action: manipulation;
         }
       `}</style>
     </div>
