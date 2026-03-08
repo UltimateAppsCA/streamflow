@@ -1140,4 +1140,783 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       `}</style>
     </div>
   );
+}    const streamUrl = useProxy 
+      ? `${apiBase}/api/stream?url=${encodeURIComponent(originalUrl)}`
+      : originalUrl;
+    
+    videoSrcRef.current = streamUrl;
+
+    console.log('Playing stream:', useProxy ? 'proxied' : 'direct', streamUrl.substring(0, 100));
+    console.log('Window location:', window.location.href);
+    console.log('API Base:', apiBase);
+
+    const setupPlayer = () => {
+      try {
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            enableWorker: true,
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+            maxBufferSize: 20 * 1000 * 1000,
+            maxBufferHole: 0.5,
+            renderTextTracksNatively: true,
+            // Android-specific settings
+            maxFragLookUpTolerance: 0.25,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 10,
+            fragLoadPolicy: {
+              default: {
+                maxTimeToFirstByteMs: 10000,
+                maxLoadTimeMs: 120000,
+                timeoutRetry: {
+                  maxNumRetry: 3,
+                  retryDelayMs: 1000,
+                  maxRetryDelayMs: 8000,
+                },
+                errorRetry: {
+                  maxNumRetry: 3,
+                  retryDelayMs: 1000,
+                  maxRetryDelayMs: 8000,
+                },
+              },
+            },
+            xhrSetup: useProxy ? undefined : (xhr, url) => {
+              if (channel.headers) {
+                Object.entries(channel.headers).forEach(([key, value]) => {
+                  xhr.setRequestHeader(key, value);
+                });
+              }
+            },
+          });
+
+          hlsRef.current = hls;
+
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            setIsLoading(false);
+            
+            if (playTimeRef.current > 0) {
+              video.currentTime = playTimeRef.current;
+            }
+            
+            video.play().then(() => {
+              setIsPlaying(true);
+              // Show controls briefly after play starts
+              showControlsTemporarily();
+            }).catch((err) => {
+              console.error('Auto-play failed:', err);
+              setIsPlaying(false);
+              // Show controls if autoplay fails
+              setShowControls(true);
+            });
+          });
+
+          hls.on(Hls.Events.ERROR, (event, data) => {
+            console.error('HLS Error:', data.type, data.details);
+            
+            if (data.fatal) {
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  console.log('Network error, attempting recovery...');
+                  hls.startLoad();
+                  break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  console.log('Media error, attempting recovery...');
+                  hls.recoverMediaError();
+                  break;
+                default:
+                  setError('This stream cannot be played. It may require authentication or be geographically restricted.');
+                  setIsLoading(false);
+                  hls.destroy();
+                  break;
+              }
+            }
+          });
+
+          hls.loadSource(streamUrl);
+          hls.attachMedia(video);
+
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          // Native HLS support (iOS)
+          video.src = streamUrl;
+          
+          video.addEventListener('loadedmetadata', () => {
+            setIsLoading(false);
+            
+            if (playTimeRef.current > 0) {
+              video.currentTime = playTimeRef.current;
+            }
+            
+            video.play().then(() => {
+              setIsPlaying(true);
+              // Show controls briefly after play starts
+              showControlsTemporarily();
+            }).catch(() => {
+              setIsPlaying(false);
+              // Show controls if autoplay fails
+              setShowControls(true);
+            });
+          });
+          
+          video.addEventListener('error', () => {
+            setError('Cannot play this stream in your browser.');
+            setIsLoading(false);
+          });
+        } else {
+          setError('HLS playback is not supported in your browser.');
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error('Player setup error:', err);
+        setError('Failed to initialize player.');
+        setIsLoading(false);
+      }
+    };
+
+    setupPlayer();
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      
+      if (video && !video.paused) {
+        playTimeRef.current = video.currentTime;
+      }
+      
+      video.pause();
+      video.src = '';
+      video.load();
+    };
+  }, [channel, showControlsTemporarily]);
+
+  const togglePlay = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+        setShowControls(true);
+        if (controlsTimeoutRef.current) {
+          clearTimeout(controlsTimeoutRef.current);
+        }
+      } else {
+        videoRef.current.play().then(() => {
+          setIsPlaying(true);
+          showControlsTemporarily();
+        }).catch(err => {
+          console.error('Play failed:', err);
+        });
+      }
+    }
+  };
+
+  const handleFullscreen = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (isIOS()) {
+      // iOS: Use video.webkitEnterFullscreen() for native fullscreen
+      try {
+        video.webkitEnterFullscreen();
+      } catch (err) {
+        console.error('iOS fullscreen failed:', err);
+      }
+    } else {
+      // Android/Desktop: Use container fullscreen
+      const container = containerRef.current;
+      if (!container) return;
+
+      if (video && !video.paused) {
+        playTimeRef.current = video.currentTime;
+      }
+
+      if (container.requestFullscreen) {
+        container.requestFullscreen();
+      } else if ((container as any).webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
+      } else if ((container as any).mozRequestFullScreen) {
+        (container as any).mozRequestFullScreen();
+      } else if ((container as any).msRequestFullscreen) {
+        (container as any).msRequestFullscreen();
+      }
+
+      // Force hide native controls on Android
+      if (isAndroid() && video) {
+        setTimeout(() => {
+          if (video) {
+            video.controls = false;
+          }
+        }, 100);
+      }
+    }
+  };
+
+  const handleExitFullscreen = () => {
+    const video = videoRef.current;
+    
+    if (isIOS() && video && video.webkitExitFullscreen) {
+      // iOS exit fullscreen
+      video.webkitExitFullscreen();
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else if ((document as any).webkitExitFullscreen) {
+      (document as any).webkitExitFullscreen();
+    } else if ((document as any).mozCancelFullScreen) {
+      (document as any).mozCancelFullScreen();
+    } else if ((document as any).msExitFullscreen) {
+      (document as any).msExitFullscreen();
+    }
+  };
+
+  const retry = () => {
+    setError(null);
+    setIsLoading(true);
+    playTimeRef.current = 0;
+    
+    if (videoRef.current) {
+      videoRef.current.src = videoSrcRef.current;
+      videoRef.current.load();
+    }
+  };
+
+  // Check if PiP is available on this device
+  const isPipAvailable = useCallback(() => {
+    if (isIOS()) {
+      // iOS 14+ supports PiP via webkitSupportsPresentationMode
+      return videoRef.current?.webkitSupportsPresentationMode?.('picture-in-picture') || false;
+    }
+    return document.pictureInPictureEnabled;
+  }, []);
+
+  return (
+    <div className="video-player" ref={containerRef}>
+      {!isFullscreen && (
+        <div className="player-header">
+          <div className="channel-info">
+            <img src={channel.logo} alt={channel.name} onError={(e) => {
+              (e.target as HTMLImageElement).src = 'https://via.placeholder.com/40?text=TV';
+            }} />
+            <div>
+              <h3>{channel.name}</h3>
+              <div className="live-badge">
+                <RadioIcon />
+                LIVE
+              </div>
+            </div>
+          </div>
+          
+          <div className="player-controls">
+            <button onClick={() => setShowRecordingModal(true)} className="record-btn">
+              <RecordIcon />
+              Record
+            </button>
+            
+            {/* PiP button - show if available */}
+            {isPipAvailable() && (
+              <button 
+                onClick={togglePip} 
+                className={`icon-btn ${isPip ? 'active' : ''}`} 
+                title="Picture in Picture"
+              >
+                <PipIcon />
+              </button>
+            )}
+            
+            {isFullscreen ? (
+              <button onClick={handleExitFullscreen} className="icon-btn" title="Exit Fullscreen">
+                <MinimizeIcon />
+              </button>
+            ) : (
+              <button onClick={handleFullscreen} className="icon-btn" title="Fullscreen">
+                <MaximizeIcon />
+              </button>
+            )}
+            <button onClick={onClose} className="icon-btn" title="Close">
+              <XIcon />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div 
+        className="video-container" 
+        onClick={handleVideoInteraction}
+        onTouchStart={handleTouchStart}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => !isMobile() && isPlaying && setShowControls(false)}
+      >
+        {isLoading && (
+          <div className="loading-overlay">
+            <div className="spinner"></div>
+            <p>Loading stream...</p>
+          </div>
+        )}
+        
+        {error && (
+          <div className="error-overlay">
+            <p>{error}</p>
+            <div className="error-actions">
+              <button onClick={retry} className="retry-btn">Retry</button>
+              <button onClick={onClose} className="close-error">Close</button>
+            </div>
+          </div>
+        )}
+
+        <video 
+          ref={videoRef} 
+          controls={false} 
+          playsInline 
+          muted={false}
+          webkit-playsinline="true"
+          x5-playsinline="true"
+          x-webkit-airplay="allow"
+          disablePictureInPicture={false}
+          disableRemotePlayback={false}
+          preload="auto"
+        />
+        
+        {!isLoading && !error && (
+          <>
+            <div className={`video-overlay ${showControls ? 'visible' : ''}`}>
+              <button className="play-btn" onClick={(e) => togglePlay(e)}>
+                {isPlaying ? <PauseIcon /> : <PlayIcon />}
+              </button>
+            </div>
+            
+            {isFullscreen && (
+              <div className={`fullscreen-header ${showControls ? 'visible' : ''}`}>
+                <div className="fullscreen-channel-info">
+                  <img src={channel.logo} alt={channel.name} />
+                  <span>{channel.name}</span>
+                </div>
+                <div className="fullscreen-controls">
+                  {isPipAvailable() && (
+                    <button onClick={togglePip} className={`fullscreen-btn ${isPip ? 'active' : ''}`}>
+                      <PipIcon />
+                    </button>
+                  )}
+                  <button onClick={handleExitFullscreen} className="fullscreen-exit-btn">
+                    <MinimizeIcon />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {showRecordingModal && (
+        <RecordingModal channel={channel} onClose={() => setShowRecordingModal(false)} />
+      )}
+
+      <style jsx>{`
+        .video-player {
+          background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
+          border-radius: 16px;
+          overflow: hidden;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .player-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 1rem 1.25rem;
+          background: rgba(0, 0, 0, 0.3);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          flex-shrink: 0;
+        }
+
+        .channel-info {
+          display: flex;
+          align-items: center;
+          gap: 0.875rem;
+        }
+
+        .channel-info img {
+          width: 40px;
+          height: 40px;
+          object-fit: contain;
+          border-radius: 8px;
+          background: #000;
+        }
+
+        .channel-info h3 {
+          margin: 0 0 0.25rem 0;
+          font-size: 1rem;
+          font-weight: 600;
+        }
+
+        .live-badge {
+          display: flex;
+          align-items: center;
+          gap: 0.375rem;
+          color: #ef4444;
+          font-size: 0.6875rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .player-controls {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .record-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem 1rem;
+          background: linear-gradient(135deg, #ff2e63 0%, #e94560 100%);
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          font-size: 0.8125rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .record-btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(233, 69, 96, 0.4);
+        }
+
+        .icon-btn {
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 8px;
+          color: #fff;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+          background: rgba(255, 255, 255, 0.2);
+        }
+
+        .icon-btn.active {
+          background: #e94560;
+        }
+
+        .video-container {
+          position: relative;
+          flex: 1;
+          min-height: 0;
+          background: #000;
+          width: 100%;
+          height: 100%;
+          cursor: pointer;
+        }
+
+        .video-container video {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          background: #000;
+        }
+
+        /* Hide default controls on Android */
+        video::-webkit-media-controls {
+          display: none !important;
+        }
+        
+        video::-webkit-media-controls-enclosure {
+          display: none !important;
+        }
+        
+        video::-webkit-media-controls-panel {
+          display: none !important;
+        }
+
+        .loading-overlay, .error-overlay {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.9);
+          z-index: 10;
+        }
+
+        .spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid rgba(255, 255, 255, 0.1);
+          border-top-color: #e94560;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        .loading-overlay p {
+          margin-top: 1rem;
+          color: #888;
+          font-size: 0.875rem;
+        }
+
+        .error-overlay p {
+          color: #ef4444;
+          text-align: center;
+          padding: 0 2rem;
+          margin-bottom: 1rem;
+          max-width: 400px;
+        }
+
+        .error-actions {
+          display: flex;
+          gap: 0.75rem;
+        }
+
+        .retry-btn, .close-error {
+          padding: 0.5rem 1.5rem;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 0.875rem;
+          transition: all 0.2s;
+        }
+
+        .retry-btn {
+          background: #e94560;
+          color: #fff;
+        }
+
+        .retry-btn:hover {
+          background: #ff2e63;
+        }
+
+        .close-error {
+          background: rgba(255, 255, 255, 0.1);
+          color: #fff;
+        }
+
+        .close-error:hover {
+          background: rgba(255, 255, 255, 0.2);
+        }
+
+        .video-overlay {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.3);
+          opacity: 0;
+          transition: opacity 0.2s;
+          pointer-events: none;
+        }
+
+        .video-overlay.visible {
+          opacity: 1;
+          pointer-events: auto;
+        }
+
+        .play-btn {
+          width: 80px;
+          height: 80px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(233, 69, 96, 0.9);
+          border: none;
+          border-radius: 50%;
+          color: #fff;
+          cursor: pointer;
+          transition: all 0.2s;
+          backdrop-filter: blur(4px);
+          pointer-events: auto;
+        }
+
+        .play-btn:hover {
+          transform: scale(1.1);
+          background: rgba(233, 69, 96, 1);
+        }
+
+        /* Fullscreen styles */
+        .video-player:fullscreen {
+          border-radius: 0;
+          background: #000;
+        }
+
+        .video-player:fullscreen .video-container {
+          height: 100vh;
+        }
+
+        .fullscreen-header {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 1.25rem;
+          background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+          z-index: 20;
+          opacity: 0;
+          transition: opacity 0.2s;
+          pointer-events: none;
+        }
+
+        .fullscreen-header.visible {
+          opacity: 1;
+          pointer-events: auto;
+        }
+
+        .fullscreen-channel-info {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          color: #fff;
+        }
+
+        .fullscreen-channel-info img {
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          object-fit: contain;
+          background: #000;
+        }
+
+        .fullscreen-channel-info span {
+          font-size: 1rem;
+          font-weight: 600;
+        }
+
+        .fullscreen-controls {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .fullscreen-btn {
+          width: 40px;
+          height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.5);
+          border: none;
+          border-radius: 50%;
+          color: #fff;
+          cursor: pointer;
+          transition: all 0.2s;
+          backdrop-filter: blur(4px);
+        }
+
+        .fullscreen-btn:hover {
+          background: rgba(0, 0, 0, 0.7);
+          transform: scale(1.1);
+        }
+
+        .fullscreen-btn.active {
+          background: #e94560;
+        }
+
+        .fullscreen-exit-btn {
+          width: 40px;
+          height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.5);
+          border: none;
+          border-radius: 50%;
+          color: #fff;
+          cursor: pointer;
+          transition: all 0.2s;
+          backdrop-filter: blur(4px);
+        }
+
+        .fullscreen-exit-btn:hover {
+          background: rgba(0, 0, 0, 0.7);
+          transform: scale(1.1);
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+
+        /* Mobile specific styles */
+        @media screen and (max-width: 768px) {
+          .video-container {
+            aspect-ratio: 16/9;
+          }
+          
+          .video-player:fullscreen .video-container {
+            aspect-ratio: auto;
+          }
+          
+          .play-btn {
+            width: 60px;
+            height: 60px;
+          }
+          
+          .play-btn svg {
+            width: 24px;
+            height: 24px;
+          }
+        }
+      `}</style>
+
+      <style jsx global>{`
+        /* Global styles to hide Android native controls */
+        video::-webkit-media-controls {
+          display: none !important;
+        }
+        
+        video::-webkit-media-controls-enclosure {
+          display: none !important;
+        }
+        
+        video::-webkit-media-controls-panel {
+          display: none !important;
+        }
+        
+        video:fullscreen {
+          width: 100%;
+          height: 100%;
+        }
+        
+        video::-webkit-media-controls-start-playback-button {
+          display: none !important;
+        }
+        
+        /* Android Chrome specific */
+        video::-webkit-media-controls-current-time-display,
+        video::-webkit-media-controls-time-remaining-display {
+          display: none !important;
+        }
+        
+        /* Prevent Android from taking over video in fullscreen */
+        video::-webkit-media-controls-overlay-play-button {
+          display: none !important;
+        }
+        
+        /* Prevent double-tap zoom on mobile */
+        .video-container {
+          touch-action: manipulation;
+        }
+      `}</style>
+    </div>
+  );
 }
